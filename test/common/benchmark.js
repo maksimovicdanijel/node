@@ -20,7 +20,8 @@ function runBenchmark(name, args, env) {
 
   const mergedEnv = Object.assign({}, process.env, env);
 
-  const child = fork(runjs, argv, { env: mergedEnv });
+  const child = fork(runjs, argv, { env: mergedEnv, stdio: 'pipe' });
+
   child.on('exit', (code, signal) => {
     assert.strictEqual(code, 0);
     assert.strictEqual(signal, null);
