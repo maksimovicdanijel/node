@@ -22,14 +22,10 @@
 #include "node.h"
 #include "node_buffer.h"
 
-#include "async-wrap.h"
 #include "async-wrap-inl.h"
-#include "env.h"
 #include "env-inl.h"
 #include "http_parser.h"
-#include "stream_base.h"
 #include "stream_base-inl.h"
-#include "util.h"
 #include "util-inl.h"
 #include "v8.h"
 
@@ -812,4 +808,4 @@ void InitHttpParser(Local<Object> target,
 }  // anonymous namespace
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_BUILTIN(http_parser, node::InitHttpParser)
+NODE_BUILTIN_MODULE_CONTEXT_AWARE(http_parser, node::InitHttpParser)

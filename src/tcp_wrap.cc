@@ -22,14 +22,12 @@
 #include "tcp_wrap.h"
 
 #include "connection_wrap.h"
-#include "env.h"
 #include "env-inl.h"
 #include "handle_wrap.h"
 #include "node_buffer.h"
 #include "node_wrap.h"
 #include "connect_wrap.h"
 #include "stream_wrap.h"
-#include "util.h"
 #include "util-inl.h"
 
 #include <stdlib.h>
@@ -90,7 +88,7 @@ void TCPWrap::Initialize(Local<Object> target,
   env->SetProtoMethod(t, "unref", HandleWrap::Unref);
   env->SetProtoMethod(t, "hasRef", HandleWrap::HasRef);
 
-  StreamWrap::AddMethods(env, t, StreamBase::kFlagHasWritev);
+  LibuvStreamWrap::AddMethods(env, t, StreamBase::kFlagHasWritev);
 
   env->SetProtoMethod(t, "open", Open);
   env->SetProtoMethod(t, "bind", Bind);
@@ -362,4 +360,4 @@ Local<Object> AddressToJS(Environment* env,
 
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_BUILTIN(tcp_wrap, node::TCPWrap::Initialize)
+NODE_BUILTIN_MODULE_CONTEXT_AWARE(tcp_wrap, node::TCPWrap::Initialize)

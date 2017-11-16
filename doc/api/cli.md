@@ -208,6 +208,14 @@ added: v2.1.0
 Prints a stack trace whenever synchronous I/O is detected after the first turn
 of the event loop.
 
+### `--no-force-async-hooks-checks`
+<!-- YAML
+added: v9.0.0
+-->
+
+Disables runtime checks for `async_hooks`. These will still be enabled
+dynamically when `async_hooks` is enabled.
+
 ### `--trace-events-enabled`
 <!-- YAML
 added: v7.7.0
@@ -463,6 +471,7 @@ Node options that are allowed are:
 V8 options that are allowed are:
 - `--abort-on-uncaught-exception`
 - `--max-old-space-size`
+- `--stack-trace-limit`
 
 ### `NODE_PENDING_DEPRECATION=1`
 <!-- YAML

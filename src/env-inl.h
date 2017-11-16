@@ -27,7 +27,6 @@
 #include "aliased_buffer.h"
 #include "env.h"
 #include "node.h"
-#include "util.h"
 #include "util-inl.h"
 #include "uv.h"
 #include "v8.h"
@@ -38,41 +37,9 @@
 
 namespace node {
 
-inline IsolateData::IsolateData(v8::Isolate* isolate, uv_loop_t* event_loop,
-                                uint32_t* zero_fill_field) :
-
-// Create string and private symbol properties as internalized one byte strings.
-//
-// Internalized because it makes property lookups a little faster and because
-// the string is created in the old space straight away.  It's going to end up
-// in the old space sooner or later anyway but now it doesn't go through
-// v8::Eternal's new space handling first.
-//
-// One byte because our strings are ASCII and we can safely skip V8's UTF-8
-// decoding step.  It's a one-time cost, but why pay it when you don't have to?
-#define V(PropertyName, StringValue)                                          \
-    PropertyName ## _(                                                        \
-        isolate,                                                              \
-        v8::Private::New(                                                     \
-            isolate,                                                          \
-            v8::String::NewFromOneByte(                                       \
-                isolate,                                                      \
-                reinterpret_cast<const uint8_t*>(StringValue),                \
-                v8::NewStringType::kInternalized,                             \
-                sizeof(StringValue) - 1).ToLocalChecked())),
-  PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(V)
-#undef V
-#define V(PropertyName, StringValue)                                          \
-    PropertyName ## _(                                                        \
-        isolate,                                                              \
-        v8::String::NewFromOneByte(                                           \
-            isolate,                                                          \
-            reinterpret_cast<const uint8_t*>(StringValue),                    \
-            v8::NewStringType::kInternalized,                                 \
-            sizeof(StringValue) - 1).ToLocalChecked()),
-    PER_ISOLATE_STRING_PROPERTIES(V)
-#undef V
-    event_loop_(event_loop), zero_fill_field_(zero_fill_field) {}
+inline v8::Isolate* IsolateData::isolate() const {
+  return isolate_;
+}
 
 inline uv_loop_t* IsolateData::event_loop() const {
   return event_loop_;
@@ -82,11 +49,22 @@ inline uint32_t* IsolateData::zero_fill_field() const {
   return zero_fill_field_;
 }
 
+inline MultiIsolatePlatform* IsolateData::platform() const {
+  return platform_;
+}
+
 inline Environment::AsyncHooks::AsyncHooks(v8::Isolate* isolate)
     : isolate_(isolate),
       fields_(isolate, kFieldsCount),
       async_id_fields_(isolate, kUidFieldsCount) {
   v8::HandleScope handle_scope(isolate_);
+
+  // Always perform async_hooks checks, not just when async_hooks is enabled.
+  // TODO(AndreasMadsen): Consider removing this for LTS releases.
+  // See discussion in https://github.com/nodejs/node/pull/15454
+  // When removing this, do it by reverting the commit. Otherwise the test
+  // and flag changes won't be included.
+  fields_[kCheck] = 1;
 
   // kAsyncIdCounter should start at 1 because that'll be the id the execution
   // context during bootstrap (code that runs before entering uv_run()).
@@ -129,10 +107,19 @@ inline v8::Local<v8::String> Environment::AsyncHooks::provider_string(int idx) {
   return providers_[idx].Get(isolate_);
 }
 
+inline void Environment::AsyncHooks::no_force_checks() {
+  // fields_ does not have the -= operator defined
+  fields_[kCheck] = fields_[kCheck] - 1;
+}
+
 inline void Environment::AsyncHooks::push_async_ids(double async_id,
                                               double trigger_async_id) {
-  CHECK_GE(async_id, -1);
-  CHECK_GE(trigger_async_id, -1);
+  // Since async_hooks is experimental, do only perform the check
+  // when async_hooks is enabled.
+  if (fields_[kCheck] > 0) {
+    CHECK_GE(async_id, -1);
+    CHECK_GE(trigger_async_id, -1);
+  }
 
   async_ids_stack_.push({ async_id_fields_[kExecutionAsyncId],
                     async_id_fields_[kTriggerAsyncId] });
@@ -145,9 +132,11 @@ inline bool Environment::AsyncHooks::pop_async_id(double async_id) {
   // stack was multiple MakeCallback()'s deep.
   if (async_ids_stack_.empty()) return false;
 
-  // Ask for the async_id to be restored as a sanity check that the stack
+  // Ask for the async_id to be restored as a check that the stack
   // hasn't been corrupted.
-  if (async_id_fields_[kExecutionAsyncId] != async_id) {
+  // Since async_hooks is experimental, do only perform the check
+  // when async_hooks is enabled.
+  if (fields_[kCheck] > 0 && async_id_fields_[kExecutionAsyncId] != async_id) {
     fprintf(stderr,
             "Error: async hook stack has become corrupted ("
             "actual: %.f, expected: %.f)\n",
@@ -185,7 +174,9 @@ inline Environment::AsyncHooks::InitScope::InitScope(
     Environment* env, double init_trigger_async_id)
         : env_(env),
           async_id_fields_ref_(env->async_hooks()->async_id_fields()) {
-  CHECK_GE(init_trigger_async_id, -1);
+  if (env_->async_hooks()->fields()[AsyncHooks::kCheck] > 0) {
+    CHECK_GE(init_trigger_async_id, -1);
+  }
   env->async_hooks()->push_async_ids(
     async_id_fields_ref_[AsyncHooks::kExecutionAsyncId],
     init_trigger_async_id);
@@ -293,7 +284,7 @@ inline Environment::Environment(IsolateData* isolate_data,
       emit_napi_warning_(true),
       makecallback_cntr_(0),
 #if HAVE_INSPECTOR
-      inspector_agent_(this),
+      inspector_agent_(new inspector::Agent(this)),
 #endif
       handle_cleanup_waiting_(0),
       http_parser_buffer_(nullptr),
@@ -333,6 +324,12 @@ inline Environment::Environment(IsolateData* isolate_data,
 
 inline Environment::~Environment() {
   v8::HandleScope handle_scope(isolate());
+
+#if HAVE_INSPECTOR
+  // Destroy inspector agent before erasing the context. The inspector
+  // destructor depends on the context still being accessible.
+  inspector_agent_.reset(nullptr);
+#endif
 
   context()->SetAlignedPointerInEmbedderData(kContextEmbedderDataIndex,
                                              nullptr);

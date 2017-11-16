@@ -1,6 +1,5 @@
 #include "node_url.h"
 #include "node_internals.h"
-#include "base-object.h"
 #include "base-object-inl.h"
 #include "node_i18n.h"
 
@@ -2221,4 +2220,4 @@ static void Init(Local<Object> target,
 }  // namespace url
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_BUILTIN(url, node::url::Init)
+NODE_BUILTIN_MODULE_CONTEXT_AWARE(url, node::url::Init)

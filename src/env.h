@@ -111,6 +111,7 @@ class ModuleWrap;
   V(callback_string, "callback")                                              \
   V(change_string, "change")                                                  \
   V(channel_string, "channel")                                                \
+  V(chunks_sent_since_last_write_string, "chunksSentSinceLastWrite")          \
   V(constants_string, "constants")                                            \
   V(oncertcb_string, "oncertcb")                                              \
   V(onclose_string, "_onclose")                                               \
@@ -184,6 +185,7 @@ class ModuleWrap;
   V(kill_signal_string, "killSignal")                                         \
   V(length_string, "length")                                                  \
   V(mac_string, "mac")                                                        \
+  V(main_string, "main")                                                      \
   V(max_buffer_string, "maxBuffer")                                           \
   V(message_string, "message")                                                \
   V(minttl_string, "minttl")                                                  \
@@ -286,6 +288,7 @@ class ModuleWrap;
   V(verify_error_string, "verifyError")                                       \
   V(version_string, "version")                                                \
   V(weight_string, "weight")                                                  \
+  V(windows_hide_string, "windowsHide")                                       \
   V(windows_verbatim_arguments_string, "windowsVerbatimArguments")            \
   V(wrap_string, "wrap")                                                      \
   V(writable_string, "writable")                                              \
@@ -339,10 +342,13 @@ struct node_async_ids {
 
 class IsolateData {
  public:
-  inline IsolateData(v8::Isolate* isolate, uv_loop_t* event_loop,
-                     uint32_t* zero_fill_field = nullptr);
+  IsolateData(v8::Isolate* isolate, uv_loop_t* event_loop,
+              MultiIsolatePlatform* platform = nullptr,
+              uint32_t* zero_fill_field = nullptr);
+  ~IsolateData();
   inline uv_loop_t* event_loop() const;
   inline uint32_t* zero_fill_field() const;
+  inline MultiIsolatePlatform* platform() const;
 
 #define VP(PropertyName, StringValue) V(v8::Private, PropertyName)
 #define VS(PropertyName, StringValue) V(v8::String, PropertyName)
@@ -355,6 +361,7 @@ class IsolateData {
 #undef VP
 
   std::unordered_map<nghttp2_rcbuf*, v8::Eternal<v8::String>> http2_static_strs;
+  inline v8::Isolate* isolate() const;
 
  private:
 #define VP(PropertyName, StringValue) V(v8::Private, PropertyName)
@@ -367,8 +374,10 @@ class IsolateData {
 #undef VS
 #undef VP
 
+  v8::Isolate* const isolate_;
   uv_loop_t* const event_loop_;
   uint32_t* const zero_fill_field_;
+  MultiIsolatePlatform* platform_;
 
   DISALLOW_COPY_AND_ASSIGN(IsolateData);
 };
@@ -386,6 +395,7 @@ class Environment {
       kDestroy,
       kPromiseResolve,
       kTotals,
+      kCheck,
       kFieldsCount,
     };
 
@@ -406,6 +416,8 @@ class Environment {
     inline int async_id_fields_count() const;
 
     inline v8::Local<v8::String> provider_string(int idx);
+
+    inline void no_force_checks();
 
     inline void push_async_ids(double async_id, double trigger_async_id);
     inline bool pop_async_id(double async_id);
@@ -612,6 +624,19 @@ class Environment {
   inline performance::performance_state* performance_state();
   inline std::map<std::string, uint64_t>* performance_marks();
 
+  void CollectExceptionInfo(v8::Local<v8::Value> context,
+                            int errorno,
+                            const char* syscall = nullptr,
+                            const char* message = nullptr,
+                            const char* path = nullptr);
+
+  void CollectUVExceptionInfo(v8::Local<v8::Value> context,
+                              int errorno,
+                              const char* syscall = nullptr,
+                              const char* message = nullptr,
+                              const char* path = nullptr,
+                              const char* dest = nullptr);
+
   inline void ThrowError(const char* errmsg);
   inline void ThrowTypeError(const char* errmsg);
   inline void ThrowRangeError(const char* errmsg);
@@ -663,8 +688,8 @@ class Environment {
 #undef V
 
 #if HAVE_INSPECTOR
-  inline inspector::Agent* inspector_agent() {
-    return &inspector_agent_;
+  inline inspector::Agent* inspector_agent() const {
+    return inspector_agent_.get();
   }
 #endif
 
@@ -709,7 +734,7 @@ class Environment {
   std::map<std::string, uint64_t> performance_marks_;
 
 #if HAVE_INSPECTOR
-  inspector::Agent inspector_agent_;
+  std::unique_ptr<inspector::Agent> inspector_agent_;
 #endif
 
   HandleWrapQueue handle_wrap_queue_;
